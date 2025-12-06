@@ -1,0 +1,278 @@
+name: 'FORGE AI-SBOM Compliance'
+description: 'Verify, audit, and check compliance of AI-generated code using FORGE CLI'
+author: 'FORGE Framework'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  # Action mode
+  action:
+    description: 'Action to perform: verify, audit, policy, generate, or all'
+    required: false
+    default: 'all'
+  
+  # File/directory targets
+  sbom-path:
+    description: 'Path to SBOM file or directory containing SBOMs'
+    required: false
+    default: '.'
+  
+  # Policy configuration  
+  policy:
+    description: 'Policy set to evaluate: security-basic, soc2, or hipaa'
+    required: false
+    default: 'security-basic'
+  
+  # Verification options
+  fail-on-invalid:
+    description: 'Fail the workflow if any SBOM signature is invalid'
+    required: false
+    default: 'true'
+  
+  fail-on-policy-violation:
+    description: 'Fail the workflow if policy check fails'
+    required: false
+    default: 'true'
+  
+  # Generation options (for generate action)
+  source-file:
+    description: 'Source file to generate SBOM for (required for generate action)'
+    required: false
+  
+  provider:
+    description: 'AI provider (anthropic, openai, gemini)'
+    required: false
+    default: 'unknown'
+  
+  model:
+    description: 'AI model ID'
+    required: false
+    default: 'unknown'
+  
+  signing-key:
+    description: 'Base64-encoded signing key JSON (use secrets)'
+    required: false
+  
+  # Output options
+  output-file:
+    description: 'Output file path for reports'
+    required: false
+  
+  output-format:
+    description: 'Report format: json, markdown, csv'
+    required: false
+    default: 'markdown'
+
+outputs:
+  verification-result:
+    description: 'Result of SBOM verification (passed/failed)'
+    value: ${{ steps.verify.outputs.result }}
+  
+  policy-result:
+    description: 'Result of policy check (passed/failed)'
+    value: ${{ steps.policy.outputs.result }}
+  
+  audit-summary:
+    description: 'Summary of audit results'
+    value: ${{ steps.audit.outputs.summary }}
+  
+  sbom-count:
+    description: 'Number of SBOMs found'
+    value: ${{ steps.audit.outputs.count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install FORGE CLI
+      shell: bash
+      run: |
+        npm install -g @forge-framework/cli@latest
+        echo "✅ FORGE CLI installed"
+        forge-cli --version || echo "Version: 1.x"
+
+    - name: Setup signing key
+      if: inputs.signing-key != ''
+      shell: bash
+      run: |
+        echo '${{ inputs.signing-key }}' | base64 -d > /tmp/forge-signing-key.json
+        echo "✅ Signing key configured"
+
+    - name: Generate SBOM
+      if: inputs.action == 'generate' && inputs.source-file != ''
+      shell: bash
+      run: |
+        KEY_ARG=""
+        if [ -f /tmp/forge-signing-key.json ]; then
+          KEY_ARG="--key-file /tmp/forge-signing-key.json"
+        fi
+        
+        OUTPUT="${{ inputs.source-file }}.sbom.json"
+        if [ -n "${{ inputs.output-file }}" ]; then
+          OUTPUT="${{ inputs.output-file }}"
+        fi
+        
+        forge-cli generate "${{ inputs.source-file }}" \
+          --provider "${{ inputs.provider }}" \
+          --model "${{ inputs.model }}" \
+          $KEY_ARG \
+          --output "$OUTPUT"
+        
+        echo "✅ SBOM generated: $OUTPUT"
+
+    - name: Verify SBOMs
+      id: verify
+      if: inputs.action == 'verify' || inputs.action == 'all'
+      shell: bash
+      run: |
+        SBOM_PATH="${{ inputs.sbom-path }}"
+        FAILED=0
+        PASSED=0
+        
+        echo "🔍 Verifying SBOMs in: $SBOM_PATH"
+        echo ""
+        
+        # Find all SBOM files
+        if [ -f "$SBOM_PATH" ]; then
+          FILES="$SBOM_PATH"
+        else
+          FILES=$(find "$SBOM_PATH" -name "*.sbom.json" -type f 2>/dev/null || echo "")
+        fi
+        
+        if [ -z "$FILES" ]; then
+          echo "⚠️ No SBOM files found"
+          echo "result=skipped" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        for sbom in $FILES; do
+          echo "📄 Verifying: $sbom"
+          if forge-cli verify "$sbom"; then
+            echo "   ✅ Valid"
+            PASSED=$((PASSED + 1))
+          else
+            echo "   ❌ Invalid"
+            FAILED=$((FAILED + 1))
+          fi
+        done
+        
+        echo ""
+        echo "📊 Verification Summary: $PASSED passed, $FAILED failed"
+        
+        if [ $FAILED -gt 0 ]; then
+          echo "result=failed" >> $GITHUB_OUTPUT
+          if [ "${{ inputs.fail-on-invalid }}" == "true" ]; then
+            echo "❌ Verification failed - invalid signatures detected"
+            exit 1
+          fi
+        else
+          echo "result=passed" >> $GITHUB_OUTPUT
+          echo "✅ All signatures valid"
+        fi
+
+    - name: Policy Check
+      id: policy
+      if: inputs.action == 'policy' || inputs.action == 'all'
+      shell: bash
+      run: |
+        SBOM_PATH="${{ inputs.sbom-path }}"
+        POLICY="${{ inputs.policy }}"
+        FAILED=0
+        PASSED=0
+        
+        echo "📋 Checking policy: $POLICY"
+        echo ""
+        
+        # Find all SBOM files
+        if [ -f "$SBOM_PATH" ]; then
+          FILES="$SBOM_PATH"
+        else
+          FILES=$(find "$SBOM_PATH" -name "*.sbom.json" -type f 2>/dev/null || echo "")
+        fi
+        
+        if [ -z "$FILES" ]; then
+          echo "⚠️ No SBOM files found"
+          echo "result=skipped" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        for sbom in $FILES; do
+          echo "📄 Checking: $sbom"
+          if forge-cli policy check "$sbom" --policy "$POLICY"; then
+            echo "   ✅ Compliant"
+            PASSED=$((PASSED + 1))
+          else
+            echo "   ❌ Non-compliant"
+            FAILED=$((FAILED + 1))
+          fi
+        done
+        
+        echo ""
+        echo "📊 Policy Summary: $PASSED compliant, $FAILED non-compliant"
+        
+        if [ $FAILED -gt 0 ]; then
+          echo "result=failed" >> $GITHUB_OUTPUT
+          if [ "${{ inputs.fail-on-policy-violation }}" == "true" ]; then
+            echo "❌ Policy check failed"
+            exit 1
+          fi
+        else
+          echo "result=passed" >> $GITHUB_OUTPUT
+          echo "✅ All SBOMs comply with $POLICY policy"
+        fi
+
+    - name: Audit SBOMs
+      id: audit
+      if: inputs.action == 'audit' || inputs.action == 'all'
+      shell: bash
+      run: |
+        SBOM_PATH="${{ inputs.sbom-path }}"
+
+        echo "📊 Auditing SBOMs in: $SBOM_PATH"
+        echo ""
+
+        # Run audit and capture output
+        AUDIT_OUTPUT=$(forge-cli audit "$SBOM_PATH" 2>&1) || true
+        echo "$AUDIT_OUTPUT"
+
+        # Extract count from output
+        COUNT=$(echo "$AUDIT_OUTPUT" | grep -oE '[0-9]+ SBOMs?' | head -1 | grep -oE '[0-9]+' || echo "0")
+        echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+        # Handle multiline output for GITHUB_OUTPUT
+        {
+          echo "summary<<EOF"
+          echo "$AUDIT_OUTPUT"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+
+    - name: Generate Report
+      if: inputs.output-file != '' && (inputs.action == 'audit' || inputs.action == 'all')
+      shell: bash
+      run: |
+        SBOM_PATH="${{ inputs.sbom-path }}"
+        OUTPUT="${{ inputs.output-file }}"
+        FORMAT="${{ inputs.output-format }}"
+        
+        # If path is a directory, find first SBOM for export
+        if [ -d "$SBOM_PATH" ]; then
+          FIRST_SBOM=$(find "$SBOM_PATH" -name "*.sbom.json" -type f | head -1)
+          if [ -n "$FIRST_SBOM" ]; then
+            forge-cli export "$FIRST_SBOM" "$OUTPUT" --format "$FORMAT"
+            echo "📄 Report generated: $OUTPUT"
+          fi
+        else
+          forge-cli export "$SBOM_PATH" "$OUTPUT" --format "$FORMAT"
+          echo "📄 Report generated: $OUTPUT"
+        fi
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: |
+        rm -f /tmp/forge-signing-key.json 2>/dev/null || true

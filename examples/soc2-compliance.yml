@@ -1,0 +1,111 @@
+# SOC2 Compliance Check
+# Copy this file to: .github/workflows/soc2-compliance.yml
+#
+# This workflow enforces SOC2 compliance for all AI-generated code.
+# Required for: SaaS companies, enterprise software, B2B products
+#
+# SOC2 Policy Requirements:
+# - Valid cryptographic signatures
+# - AI review/approval documented
+# - Provenance chain intact
+# - Test coverage >= 80%
+# - Linting passed
+
+name: SOC2 Compliance
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  soc2-compliance:
+    name: SOC2 Compliance Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install FORGE CLI
+        run: npm install -g @forge-framework/cli
+
+      - name: Find SBOM files
+        id: find-sboms
+        run: |
+          SBOM_FILES=$(find . -name "*.sbom.json" -type f | tr '\n' ' ')
+          echo "files=$SBOM_FILES" >> $GITHUB_OUTPUT
+          echo "count=$(echo $SBOM_FILES | wc -w | tr -d ' ')" >> $GITHUB_OUTPUT
+
+      - name: Verify signatures
+        run: |
+          echo "🔐 Step 1: Signature Verification"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          for sbom in ${{ steps.find-sboms.outputs.files }}; do
+            forge-cli verify "$sbom" || exit 1
+          done
+          
+          echo "✅ All signatures valid"
+
+      - name: Check SOC2 policy
+        run: |
+          echo ""
+          echo "📋 Step 2: SOC2 Policy Evaluation"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          VIOLATIONS=0
+          
+          for sbom in ${{ steps.find-sboms.outputs.files }}; do
+            echo ""
+            echo "📄 Checking: $sbom"
+            if forge-cli policy check "$sbom" --policy soc2; then
+              echo "   ✅ SOC2 compliant"
+            else
+              echo "   ❌ SOC2 violation"
+              VIOLATIONS=$((VIOLATIONS + 1))
+            fi
+          done
+          
+          if [ $VIOLATIONS -gt 0 ]; then
+            echo ""
+            echo "❌ SOC2 COMPLIANCE FAILED"
+            echo "$VIOLATIONS artifact(s) do not meet SOC2 requirements"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ All artifacts SOC2 compliant"
+
+      - name: Generate audit report
+        if: always()
+        run: |
+          echo ""
+          echo "📊 Step 3: Audit Report"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          forge-cli audit .
+          
+      - name: Create compliance summary
+        if: always()
+        run: |
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "        SOC2 COMPLIANCE SUMMARY"
+          echo "════════════════════════════════════════"
+          echo ""
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit:     ${{ github.sha }}"
+          echo "Branch:     ${{ github.ref_name }}"
+          echo "Timestamp:  $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "SBOMs:      ${{ steps.find-sboms.outputs.count }}"
+          echo ""
+          echo "This report can be used as evidence for"
+          echo "SOC2 Type II audit documentation."
+          echo ""
+          echo "════════════════════════════════════════"

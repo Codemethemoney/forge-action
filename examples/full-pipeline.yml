@@ -1,0 +1,215 @@
+# Full Compliance Pipeline
+# Copy this file to: .github/workflows/forge-compliance.yml
+#
+# This is a complete compliance pipeline with:
+# - Signature verification
+# - Policy compliance check
+# - Audit report generation
+# - Artifact upload
+# - PR comment with results
+
+name: AI Code Compliance
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Weekly audit every Monday at 9am UTC
+    - cron: '0 9 * * 1'
+
+env:
+  # Change this to your required policy: security-basic, soc2, or hipaa
+  POLICY: soc2
+
+jobs:
+  compliance:
+    name: AI-SBOM Compliance
+    runs-on: ubuntu-latest
+    outputs:
+      verification-result: ${{ steps.verify.outputs.result }}
+      policy-result: ${{ steps.policy.outputs.result }}
+      sbom-count: ${{ steps.audit.outputs.count }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install FORGE CLI
+        run: |
+          npm install -g @forge-framework/cli
+          echo "FORGE CLI version: $(forge-cli --version)"
+
+      - name: Find SBOM files
+        id: find
+        run: |
+          COUNT=$(find . -name "*.sbom.json" -type f | wc -l | tr -d ' ')
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          
+          if [ "$COUNT" -eq "0" ]; then
+            echo "⚠️ No SBOM files found in repository"
+            echo "has-sboms=false" >> $GITHUB_OUTPUT
+          else
+            echo "📦 Found $COUNT SBOM file(s)"
+            echo "has-sboms=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify signatures
+        id: verify
+        if: steps.find.outputs.has-sboms == 'true'
+        run: |
+          echo "🔐 Signature Verification"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          FAILED=0
+          PASSED=0
+          
+          for sbom in $(find . -name "*.sbom.json" -type f); do
+            if forge-cli verify "$sbom" 2>/dev/null; then
+              PASSED=$((PASSED + 1))
+            else
+              FAILED=$((FAILED + 1))
+              echo "❌ Invalid: $sbom"
+            fi
+          done
+          
+          echo ""
+          echo "Results: $PASSED valid, $FAILED invalid"
+          
+          if [ $FAILED -gt 0 ]; then
+            echo "result=failed" >> $GITHUB_OUTPUT
+            echo "❌ Verification failed"
+            exit 1
+          else
+            echo "result=passed" >> $GITHUB_OUTPUT
+            echo "✅ All signatures valid"
+          fi
+
+      - name: Policy compliance check
+        id: policy
+        if: steps.find.outputs.has-sboms == 'true'
+        run: |
+          echo ""
+          echo "📋 Policy Check: ${{ env.POLICY }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          FAILED=0
+          PASSED=0
+          
+          for sbom in $(find . -name "*.sbom.json" -type f); do
+            if forge-cli policy check "$sbom" --policy "${{ env.POLICY }}" 2>/dev/null; then
+              PASSED=$((PASSED + 1))
+            else
+              FAILED=$((FAILED + 1))
+              echo "❌ Non-compliant: $sbom"
+            fi
+          done
+          
+          echo ""
+          echo "Results: $PASSED compliant, $FAILED non-compliant"
+          
+          if [ $FAILED -gt 0 ]; then
+            echo "result=failed" >> $GITHUB_OUTPUT
+            echo "❌ Policy check failed"
+            exit 1
+          else
+            echo "result=passed" >> $GITHUB_OUTPUT
+            echo "✅ All artifacts compliant"
+          fi
+
+      - name: Generate audit report
+        id: audit
+        if: always() && steps.find.outputs.has-sboms == 'true'
+        run: |
+          echo ""
+          echo "📊 Generating Audit Report"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          mkdir -p reports
+          forge-cli audit . > reports/audit-summary.txt 2>&1 || true
+          
+          # Export first SBOM to markdown for detailed report
+          FIRST_SBOM=$(find . -name "*.sbom.json" -type f | head -1)
+          if [ -n "$FIRST_SBOM" ]; then
+            forge-cli export "$FIRST_SBOM" reports/sbom-report.md --format markdown 2>/dev/null || true
+          fi
+          
+          echo "count=${{ steps.find.outputs.count }}" >> $GITHUB_OUTPUT
+          cat reports/audit-summary.txt
+
+      - name: Upload compliance reports
+        if: always() && steps.find.outputs.has-sboms == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-reports-${{ github.sha }}
+          path: reports/
+          retention-days: 90
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## 🔒 FORGE AI-SBOM Compliance Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| SBOMs Found | ${{ steps.find.outputs.count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Signature Verification | ${{ steps.verify.outputs.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Policy (${{ env.POLICY }}) | ${{ steps.policy.outputs.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # Comment on PR with results
+  pr-comment:
+    name: PR Comment
+    needs: compliance
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    
+    steps:
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const verifyResult = '${{ needs.compliance.outputs.verification-result }}' || 'skipped';
+            const policyResult = '${{ needs.compliance.outputs.policy-result }}' || 'skipped';
+            const sbomCount = '${{ needs.compliance.outputs.sbom-count }}' || '0';
+            
+            const verifyEmoji = verifyResult === 'passed' ? '✅' : verifyResult === 'failed' ? '❌' : '⏭️';
+            const policyEmoji = policyResult === 'passed' ? '✅' : policyResult === 'failed' ? '❌' : '⏭️';
+            const overallEmoji = (verifyResult === 'passed' && policyResult === 'passed') ? '✅' : 
+                                 (verifyResult === 'failed' || policyResult === 'failed') ? '❌' : '⚠️';
+            
+            const body = `## ${overallEmoji} FORGE AI-SBOM Compliance
+            
+            | Check | Result |
+            |-------|--------|
+            | SBOMs Found | ${sbomCount} |
+            | ${verifyEmoji} Signature Verification | ${verifyResult} |
+            | ${policyEmoji} Policy (soc2) | ${policyResult} |
+            
+            <details>
+            <summary>What is this?</summary>
+            
+            FORGE verifies that all AI-generated code in this PR has:
+            - Valid cryptographic signatures (proves code hasn't been tampered with)
+            - Policy compliance (meets SOC2/HIPAA requirements)
+            - Complete audit trail (tracks which AI generated what)
+            
+            [Learn more about FORGE](https://github.com/forge-framework/forge-cli)
+            </details>`;
+            
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });

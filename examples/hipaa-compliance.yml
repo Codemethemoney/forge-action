@@ -1,0 +1,158 @@
+# HIPAA Compliance Check
+# Copy this file to: .github/workflows/hipaa-compliance.yml
+#
+# This workflow enforces HIPAA compliance for AI-generated code.
+# Required for: Healthcare software, medical devices, health data processors
+#
+# HIPAA Policy Requirements:
+# - Only HIPAA-compliant AI providers (Anthropic with BAA, Azure OpenAI)
+# - No PHI (Protected Health Information) in prompts
+# - Data classification documented
+# - Valid signatures and provenance chain
+# - Audit trail for FDA 21 CFR Part 11
+
+name: HIPAA Compliance
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Required for healthcare organizations
+env:
+  COMPLIANCE_STANDARD: HIPAA
+  AUDIT_RETENTION_YEARS: 6  # HIPAA requires 6-year record retention
+
+jobs:
+  hipaa-compliance:
+    name: HIPAA Compliance Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install FORGE CLI
+        run: npm install -g @forge-framework/cli
+
+      - name: Audit AI-generated code
+        run: |
+          echo "════════════════════════════════════════"
+          echo "     HIPAA COMPLIANCE VERIFICATION"
+          echo "════════════════════════════════════════"
+          echo ""
+          echo "Standard: HIPAA / HITECH Act"
+          echo "Context:  21 CFR Part 11 (Electronic Records)"
+          echo ""
+
+      - name: Verify signatures (integrity check)
+        run: |
+          echo "🔐 HIPAA Requirement: Data Integrity"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Per 45 CFR § 164.312(c)(1) - Integrity Controls"
+          echo ""
+          
+          SBOM_FILES=$(find . -name "*.sbom.json" -type f)
+          
+          if [ -z "$SBOM_FILES" ]; then
+            echo "⚠️  No SBOM files found"
+            exit 0
+          fi
+          
+          for sbom in $SBOM_FILES; do
+            echo "Verifying: $sbom"
+            forge-cli verify "$sbom" || {
+              echo "❌ INTEGRITY VIOLATION: Signature invalid"
+              echo "This may indicate unauthorized modification of ePHI-processing code"
+              exit 1
+            }
+          done
+          
+          echo "✅ Integrity controls verified"
+
+      - name: Check HIPAA policy compliance
+        run: |
+          echo ""
+          echo "📋 HIPAA Provider & Data Requirements"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Checking:"
+          echo "  • AI provider has signed BAA"
+          echo "  • No PHI in generation prompts"
+          echo "  • Appropriate data classification"
+          echo ""
+          
+          SBOM_FILES=$(find . -name "*.sbom.json" -type f)
+          VIOLATIONS=0
+          
+          for sbom in $SBOM_FILES; do
+            echo "📄 $sbom"
+            if forge-cli policy check "$sbom" --policy hipaa; then
+              echo "   ✅ HIPAA compliant"
+            else
+              echo "   ❌ HIPAA VIOLATION DETECTED"
+              VIOLATIONS=$((VIOLATIONS + 1))
+            fi
+          done
+          
+          if [ $VIOLATIONS -gt 0 ]; then
+            echo ""
+            echo "════════════════════════════════════════"
+            echo "❌ HIPAA COMPLIANCE FAILURE"
+            echo "════════════════════════════════════════"
+            echo ""
+            echo "$VIOLATIONS artifact(s) violate HIPAA requirements."
+            echo ""
+            echo "Common issues:"
+            echo "  • Using non-BAA AI provider (e.g., raw OpenAI API)"
+            echo "  • PHI detected in prompt metadata"
+            echo "  • Missing data classification"
+            echo ""
+            echo "Remediation required before deployment."
+            exit 1
+          fi
+
+      - name: Generate HIPAA audit report
+        if: always()
+        run: |
+          echo ""
+          echo "📊 HIPAA Audit Trail"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          forge-cli audit .
+
+      - name: Create compliance certificate
+        if: success()
+        run: |
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "   HIPAA COMPLIANCE VERIFICATION"
+          echo "════════════════════════════════════════"
+          echo ""
+          echo "Status:      ✅ COMPLIANT"
+          echo "Standard:    HIPAA / HITECH Act"
+          echo "Reference:   45 CFR Parts 160, 162, 164"
+          echo ""
+          echo "Repository:  ${{ github.repository }}"
+          echo "Commit:      ${{ github.sha }}"
+          echo "Branch:      ${{ github.ref_name }}"
+          echo "Verified:    $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "Workflow:    ${{ github.run_id }}"
+          echo ""
+          echo "This verification confirms that all AI-generated"
+          echo "code artifacts in this commit comply with HIPAA"
+          echo "requirements for:"
+          echo ""
+          echo "  • Provider compliance (BAA signed)"
+          echo "  • PHI protection in prompts"
+          echo "  • Cryptographic integrity"
+          echo "  • Audit trail documentation"
+          echo ""
+          echo "Retain this record for minimum 6 years per"
+          echo "45 CFR § 164.530(j)."
+          echo ""
+          echo "════════════════════════════════════════"

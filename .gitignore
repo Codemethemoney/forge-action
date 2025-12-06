@@ -1,0 +1,20 @@
+# Node modules (not needed for composite action)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local test files
+*.local.yml
+test-*.yml

@@ -1,0 +1,71 @@
+# Basic AI-SBOM Verification
+# Copy this file to: .github/workflows/forge-verify.yml
+#
+# This workflow verifies all SBOM signatures on every push and PR.
+# Fails the build if any signature is invalid.
+
+name: FORGE Verification
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  verify-sboms:
+    name: Verify AI-SBOMs
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install FORGE CLI
+        run: npm install -g @forge-framework/cli
+
+      - name: Verify all SBOMs
+        run: |
+          echo "🔍 Searching for SBOM files..."
+          
+          SBOM_FILES=$(find . -name "*.sbom.json" -type f)
+          
+          if [ -z "$SBOM_FILES" ]; then
+            echo "⚠️  No SBOM files found"
+            exit 0
+          fi
+          
+          FAILED=0
+          PASSED=0
+          
+          for sbom in $SBOM_FILES; do
+            echo ""
+            echo "📄 Verifying: $sbom"
+            if forge-cli verify "$sbom"; then
+              echo "   ✅ Signature valid"
+              PASSED=$((PASSED + 1))
+            else
+              echo "   ❌ Signature INVALID"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 Results: $PASSED passed, $FAILED failed"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          if [ $FAILED -gt 0 ]; then
+            echo ""
+            echo "❌ VERIFICATION FAILED"
+            echo "Some SBOMs have invalid signatures - possible tampering detected!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ All signatures verified successfully"
