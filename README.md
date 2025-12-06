@@ -13,19 +13,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: FORGE Compliance Check
-        uses: forge-framework/forge-action@v1
+        uses: Codemethemoney/forge-action@v1
         with:
           policy: soc2
 ```
 
 That's it! This will:
-- ✅ Find all `*.sbom.json` files in your repository
-- ✅ Verify cryptographic signatures
-- ✅ Check SOC2 compliance
-- ✅ Generate audit summary
-- ❌ Fail the build if any check fails
+- Find all `*.sbom.json` files in your repository
+- Verify cryptographic signatures
+- Check SOC2 compliance
+- Generate audit summary
+- Fail the build if any check fails
 
 ## Inputs
 
@@ -59,7 +59,7 @@ That's it! This will:
 Verify all SBOMs on every push:
 
 ```yaml
-- uses: forge-framework/forge-action@v1
+- uses: Codemethemoney/forge-action@v1
   with:
     action: verify
 ```
@@ -77,9 +77,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Check SOC2 Compliance
-        uses: forge-framework/forge-action@v1
+        uses: Codemethemoney/forge-action@v1
         with:
           policy: soc2
           fail-on-policy-violation: true
@@ -88,7 +88,7 @@ jobs:
 ### HIPAA Compliance for Healthcare
 
 ```yaml
-- uses: forge-framework/forge-action@v1
+- uses: Codemethemoney/forge-action@v1
   with:
     policy: hipaa
     sbom-path: ./ai-generated/
@@ -100,7 +100,7 @@ Generate SBOM for AI-generated code during build:
 
 ```yaml
 - name: Generate SBOM
-  uses: forge-framework/forge-action@v1
+  uses: Codemethemoney/forge-action@v1
   with:
     action: generate
     source-file: src/ai-generated/login.ts
@@ -127,7 +127,7 @@ Create a compliance report and upload as artifact:
 
 ```yaml
 - name: FORGE Compliance Check
-  uses: forge-framework/forge-action@v1
+  uses: Codemethemoney/forge-action@v1
   with:
     sbom-path: ./sboms/
     policy: soc2
@@ -158,17 +158,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       # Run full compliance check
       - name: FORGE Compliance
         id: forge
-        uses: forge-framework/forge-action@v1
+        uses: Codemethemoney/forge-action@v1
         with:
           sbom-path: ./sboms/
           policy: soc2
           output-file: reports/compliance-report.md
           output-format: markdown
-      
+
       # Upload report as artifact
       - name: Upload Compliance Report
         uses: actions/upload-artifact@v4
@@ -176,7 +176,7 @@ jobs:
         with:
           name: compliance-report-${{ github.sha }}
           path: reports/compliance-report.md
-      
+
       # Comment on PR with results
       - name: Comment PR
         if: github.event_name == 'pull_request'
@@ -186,7 +186,7 @@ jobs:
             const result = '${{ steps.forge.outputs.policy-result }}';
             const count = '${{ steps.forge.outputs.sbom-count }}';
             const emoji = result === 'passed' ? '✅' : '❌';
-            
+
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -214,14 +214,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Full Audit
-        uses: forge-framework/forge-action@v1
+        uses: Codemethemoney/forge-action@v1
         with:
           action: audit
           sbom-path: .
           output-file: weekly-audit.md
-      
+
       - name: Send Report
         # Email or Slack notification with report
 ```
@@ -263,6 +263,6 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 ## Support
 
-- **Issues:** https://github.com/forge-framework/forge-action/issues
-- **CLI Documentation:** https://github.com/forge-framework/forge-cli
-- **FORGE Framework:** https://github.com/forge-framework
+- **Issues:** https://github.com/Codemethemoney/forge-action/issues
+- **CLI Documentation:** https://github.com/Codemethemoney/forge-cli
+- **FORGE Framework:** https://github.com/Codemethemoney
